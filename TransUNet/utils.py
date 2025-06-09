@@ -3,7 +3,7 @@ import torch
 from medpy import metric
 import cv2
 import torch.nn as nn
-import SimpleITK as sitk
+# import SimpleITK as sitk
 np.bool = np.bool_
 
 

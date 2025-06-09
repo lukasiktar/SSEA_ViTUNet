@@ -1,6 +1,6 @@
 data.csv
-data/
 !data/01_preprocessing.py
+data/
 
 model
 

@@ -1,0 +1,7 @@
+opencv-python==4.11.0.86
+tqdm==4.67.1
+pydicom==3.0.1
+numpy==2.2.6
+pandas==2.3.0
+natsort==8.4.0
+scikit-learn==1.7.0

@@ -1,4 +1,7 @@
+opencv-python==4.11.0.86
+tqdm==4.67.1
 numpy==2.2.6
+natsort==8.4.0
 scipy==1.15.3
 ml-collections==1.1.0
 torch==2.7.1

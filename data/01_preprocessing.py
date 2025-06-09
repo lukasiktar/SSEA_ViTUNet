@@ -2,13 +2,13 @@
 import os
 import glob
 import cv2
-from tqdm import tqdm
+# from tqdm import tqdm
 import pydicom
 import numpy as np
 import pandas as pd
 
 from natsort import natsorted
-from pydicom.dataset import FileDataset, FileMetaDataset
+# from pydicom.dataset import FileDataset, FileMetaDataset
 from sklearn.model_selection import train_test_split
 
 #Data preprocessing and 2d images generation
@@ -69,7 +69,8 @@ print('There are {} images, {} masks for testing.'.format(len(list_of_test_image
 
 #Load DICOM images
 print('Storing train images.')
-for i in tqdm(range(len(list_of_image))):  
+# for i in tqdm(range(len(list_of_image))):
+for i in range(len(list_of_image)):
     img_name = list_of_image[i]
     mask_name = list_of_mask[i]
     prean_name = list_of_preannotation[i]
@@ -104,7 +105,8 @@ for i in tqdm(range(len(list_of_image))):
     cv2.imwrite(output_prean_name, prean)
 
 print('Storing validation images.')
-for i in tqdm(range(len(list_of_validation_image))):
+# for i in tqdm(range(len(list_of_validation_image))):
+for i in range(len(list_of_validation_image)):
     val_img_name = list_of_validation_image[i]
     val_mask_name = list_of_validation_mask[i]
 
@@ -127,7 +129,8 @@ for i in tqdm(range(len(list_of_validation_image))):
     cv2.imwrite(output_val_mask_name, val_mask)
 
 print('Storing test images.')
-for i in tqdm(range(len(list_of_test_image))):
+# for i in tqdm(range(len(list_of_test_image))):
+for i in range(len(list_of_test_image)):
     test_img_name = list_of_test_image[i]
     test_mask_name = list_of_test_mask[i]
 

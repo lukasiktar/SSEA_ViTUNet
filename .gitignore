@@ -11,3 +11,9 @@ TransUNet/datasets/__pycache__
 
 # virtual environment
 .venv/
+
+# apptainer
+image.sif
+
+# test files
+test.py

@@ -1,0 +1,10 @@
+Bootstrap: docker
+From: python:3.10.12
+
+%files
+    $PWD/apptainer-req.txt requirements.txt
+
+%post
+    apt-get update && \
+    apt-get install -y libgl1 && \
+    pip install --root-user-action=ignore -r requirements.txt

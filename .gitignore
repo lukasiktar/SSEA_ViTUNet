@@ -13,7 +13,7 @@ TransUNet/datasets/__pycache__
 .venv/
 
 # apptainer
-image.sif
+*.sif
 
 # test files
 test.py

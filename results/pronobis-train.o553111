@@ -1,0 +1,18 @@
+Namespace(root_path='./data/train_png', validation_path='./data/validation_png', list_dir='lists', num_classes=1, max_iterations=30000, max_epochs_seg=30, max_epochs_cls=30, batch_size=4, n_gpu=1, deterministic=1, base_lr=0.01, img_size=224, seed=1234, n_skip=3, vit_name='R50-ViT-B_16', vit_patches_size=16, weight=4, is_pretrain=True, exp='SSEA_ViTUnet')
+The length of train set is: 4410
+1103 iterations per epoch. 33090 max iterations 
+Epoch 0 : loss : 0.110226
+Mean validation performance: dice : 0.942319 hd95 : 52.596929 jc : 0.893728  sp : 0.976916 precision : 0.945448 recall : 0.944022
+save model to ./model/SSEA_ViTUnet_R50-ViT-B_16_img224_seg_epo30_cls_epo30_bs4/best_seg.pth
+mean dice of the best model is 0.9423193564124507
+Epoch 1 : loss : 0.085584
+Mean validation performance: dice : 0.945043 hd95 : 51.671980 jc : 0.899814  sp : 0.978618 precision : 0.955623 recall : 0.941421
+save model to ./model/SSEA_ViTUnet_R50-ViT-B_16_img224_seg_epo30_cls_epo30_bs4/best_seg.pth
+mean dice of the best model is 0.9450428526001885
+Epoch 2 : loss : 0.080992
+Mean validation performance: dice : 0.952234 hd95 : 42.280367 jc : 0.912944  sp : 0.982442 precision : 0.957629 recall : 0.953204
+save model to ./model/SSEA_ViTUnet_R50-ViT-B_16_img224_seg_epo30_cls_epo30_bs4/best_seg.pth
+mean dice of the best model is 0.9522335804088221
+Epoch 3 : loss : 0.077302
+Mean validation performance: dice : 0.951892 hd95 : 45.311999 jc : 0.911040  sp : 0.982556 precision : 0.956799 recall : 0.950699
+Epoch 4 : loss : 0.076570

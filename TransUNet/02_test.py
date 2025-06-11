@@ -18,6 +18,8 @@ from networks.vit_seg_modeling import CONFIGS as CONFIGS_ViT_seg
 parser = argparse.ArgumentParser()
 parser.add_argument('--root_path', type=str,
                     default='./data/test_png', help='root dir for test data')
+parser.add_argument('--unlabelled_data_path', type=str,
+                    default='./data/unlabelled_png', help='root dir for training data')
 parser.add_argument('--dataset', type=str,
                     default='SSEA_ViTUnet', help='experiment_name')
 parser.add_argument('--list_dir', type=str,
@@ -56,7 +58,7 @@ args = parser.parse_args()
 
 
 def inference(args, model, test_save_path):
-    db_test = Synapse_dataset(args.root_path, split="test_vol", list_dir=args.list_dir)
+    db_test = Synapse_dataset(args.root_path, unlabelled_dir=args.unlabelled_data_path, split="test_vol", list_dir=args.list_dir)
     testloader = DataLoader(db_test, batch_size=1, shuffle=False, num_workers=1)
     logging.info("{} test iterations per epoch".format(len(testloader)))
     model.eval()

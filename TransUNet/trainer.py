@@ -11,11 +11,11 @@ from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader
 from torchvision import transforms
 import torchvision.transforms.functional as TF
-
+import torch.nn.functional as F
 from utils import attention_BCE_loss, AreaWeightedLoss, test_single_volume
 
 
-def trainer(args, model, snapshot_path):
+def trainer(args, student_model, teacher_model, snapshot_path):
     from datasets.Synapse_dataset import MultiscaleGenerator, Synapse_dataset
 
     logging.basicConfig(filename=snapshot_path + "/log.txt", level=logging.INFO,
@@ -28,7 +28,7 @@ def trainer(args, model, snapshot_path):
     batch_size = args.batch_size * args.n_gpu
     hard_weight = args.weight
 
-    db_train = Synapse_dataset(dataset_dir=args.root_path, list_dir=args.list_dir, split="train",
+    db_train = Synapse_dataset(dataset_dir=args.root_path, unlabelled_dir=args.unlabelled_data_path, list_dir=args.list_dir, split="train",
                                transform=transforms.Compose(
                                    [MultiscaleGenerator(output_size=[[28, 28], [56, 56], [112, 112], [args.img_size, args.img_size]])]))
     print("The length of train set is: {}".format(len(db_train)))
@@ -38,10 +38,10 @@ def trainer(args, model, snapshot_path):
 
     trainloader = DataLoader(db_train, batch_size=batch_size, shuffle=True, num_workers=8, worker_init_fn=worker_init_fn)
     if args.n_gpu > 1:
-        model = nn.DataParallel(model)
-    model.train()
+        student_model = nn.DataParallel(student_model)
+    student_model.train()
 
-    optimizer = optim.SGD(model.parameters(), lr=base_lr, momentum=0.9, weight_decay=0.0001)
+    optimizer = optim.SGD(student_model.parameters(), lr=base_lr, momentum=0.9, weight_decay=0.0001)
 
     writer = SummaryWriter(snapshot_path + '/log')
 
@@ -60,20 +60,22 @@ def trainer(args, model, snapshot_path):
     cls_iterator=tqdm(range(max_epoch_cls), ncols=70)
 
     #Validation setup
-    db_validation=Synapse_dataset(dataset_dir=args.validation_path, split="validation", list_dir=args.list_dir)
+    db_validation=Synapse_dataset(dataset_dir=args.validation_path, unlabelled_dir=args.unlabelled_data_path, split="validation", list_dir=args.list_dir)
     validationloader=DataLoader(db_validation, batch_size=1, shuffle=False, num_workers=1)
-   
-    model=train_segmentation(args,model, trainloader, optimizer, db_validation, validationloader, seg_iterator, base_lr, hard_weight,writer,max_epochs_seg, max_iterations, snapshot_path, iter_num, criterion)
 
-    train_classification(args, model, trainloader, optimizer, db_validation, validationloader, cls_iterator, base_lr ,criterion_cls, writer, max_epoch_cls, max_iterations, snapshot_path, iter_num)          
+    enable_dropout(student_model)
+   
+    student_model=train_segmentation(args,student_model, teacher_model, trainloader, optimizer, db_validation, validationloader, seg_iterator, base_lr, hard_weight,writer,max_epochs_seg, max_iterations, snapshot_path, iter_num, criterion)
+
+    train_classification(args, student_model, teacher_model, trainloader, optimizer, db_validation, validationloader, cls_iterator, base_lr ,criterion_cls, writer, max_epoch_cls, max_iterations, snapshot_path, iter_num)          
 
     writer.close()
     logging.shutdown()
 
     return "Training Finished!"
 
-def validation(args, model, db_validation, validationloader, max_dice, snapshot_path, best_model, segmentation=True):
-    model.eval()
+def validation(args, student_model, db_validation, validationloader, max_dice, snapshot_path, best_student_model, segmentation=True):
+    student_model.eval()
     metric_list = 0.0
     result_list = []
 
@@ -89,7 +91,7 @@ def validation(args, model, db_validation, validationloader, max_dice, snapshot_
     for i_batch, sampled_batch in enumerate(validationloader):
         image, label, case_name = sampled_batch["image"], sampled_batch["label"], sampled_batch['case_name'][0]
         test_save_path = "./predictions"
-        metric_i = test_single_volume(image, label, model, classes=args.num_classes, patch_size=[args.img_size, args.img_size],test_save_path=test_save_path, case=case_name, classification=False)
+        metric_i = test_single_volume(image, label, student_model, classes=args.num_classes, patch_size=[args.img_size, args.img_size],test_save_path=test_save_path, case=case_name, classification=False)
         if metric_i[0]!= 0.0:
             test_images_counter+=1
             metric_list += np.array(metric_i)
@@ -120,38 +122,38 @@ def validation(args, model, db_validation, validationloader, max_dice, snapshot_
     except:
            mean_dice=0.0
 
-    best_model=best_model
+    best_student_model=best_student_model
     if mean_dice > max_dice:
         max_dice=mean_dice
-        best_model=model
+        best_student_model=student_model
         if segmentation:
             save_mode_path = os.path.join(snapshot_path, 'best_seg'+ '.pth')
         else:
             save_mode_path = os.path.join(snapshot_path, 'best_cls'+ '.pth')
-        torch.save(model.state_dict(), save_mode_path)
-        logging.info("save model to {}".format(save_mode_path))
-        logging.info("mean dice of the best model is {}".format(max_dice))
-    best_model.train()
-    return max_dice, best_model
+        torch.save(student_model.state_dict(), save_mode_path)
+        logging.info("save student_model to {}".format(save_mode_path))
+        logging.info("mean dice of the best student_model is {}".format(max_dice))
+    best_student_model.train()
+    return max_dice, best_student_model
 
-def train_segmentation(args,model, trainloader, optimizer, db_validation, validationloader,  iterator, base_lr, hard_weight,writer,max_epoch, max_iterations, snapshot_path, iter_num, criterion):
+def train_segmentation(args,student_model, teacher_model, trainloader, optimizer, db_validation, validationloader,  iterator, base_lr, hard_weight,writer,max_epoch, max_iterations, snapshot_path, iter_num, criterion):
         #Freeze the classification head
-        for param in model.classification_head.parameters():
+        for param in student_model.classification_head.parameters():
             param.requires_grad=False
 
-        for param in model.decoder.parameters():
+        for param in student_model.decoder.parameters():
             param.requires_grad = True
-        for param in model.segmentation_head.parameters():
+        for param in student_model.segmentation_head.parameters():
             param.requires_grad = True
 
         max_dice=0.0
         #Initialize the first model as the best model at the start of the training
-        best_model=model
+        best_student_model=student_model
         for epoch_num in iterator:
             epoch_loss = []
             for i_batch, sampled_batch in enumerate(tqdm(trainloader)):
-                image_batch, label_batch, label0_batch, label1_batch, label2_batch, preannotation_batch, preannotation0_batch, preannotation1_batch, preannotation2_batch = sampled_batch['image'], sampled_batch['label'], sampled_batch['label0'], sampled_batch['label1'], sampled_batch['label2'], sampled_batch['preannotation'], sampled_batch['preannotation0'], sampled_batch['preannotation1'], sampled_batch['preannotation2']
-                image_batch, label_batch, label0_batch, label1_batch, label2_batch, preannotation_batch, preannotation0_batch, preannotation1_batch, preannotation2_batch = image_batch.cuda(), label_batch.cuda(), label0_batch.cuda(), label1_batch.cuda(), label2_batch.cuda(), preannotation_batch.cuda(), preannotation0_batch.cuda(), preannotation1_batch.cuda(), preannotation2_batch.cuda()
+                image_batch, label_batch, label0_batch, label1_batch, label2_batch, preannotation_batch, preannotation0_batch, preannotation1_batch, preannotation2_batch, unlabelled_image_batch = sampled_batch['image'], sampled_batch['label'], sampled_batch['label0'], sampled_batch['label1'], sampled_batch['label2'], sampled_batch['preannotation'], sampled_batch['preannotation0'], sampled_batch['preannotation1'], sampled_batch['preannotation2'], sampled_batch['unlabelled_image']
+                image_batch, label_batch, label0_batch, label1_batch, label2_batch, preannotation_batch, preannotation0_batch, preannotation1_batch, preannotation2_batch, unlabelled_image_batch = image_batch.cuda(), label_batch.cuda(), label0_batch.cuda(), label1_batch.cuda(), label2_batch.cuda(), preannotation_batch.cuda(), preannotation0_batch.cuda(), preannotation1_batch.cuda(), preannotation2_batch.cuda(), unlabelled_image_batch.cuda()
                 
                 #Augmentation process
                 B=image_batch.size(0)
@@ -199,7 +201,7 @@ def train_segmentation(args,model, trainloader, optimizer, db_validation, valida
 
                 # # Calculate cls_label_batch
                 # cls_label_batch = (label_batch.sum(dim=(1,2)) > 0).float()
-                # outputs, out0, out1, out2, cls_output = model(image_batch)
+                # outputs, out0, out1, out2, cls_output = student_model(image_batch)
                 # outputs = torch.sigmoid(outputs).squeeze(dim=1)
                 # out0 = torch.sigmoid(out0).squeeze(dim=1)
                 # out1 = torch.sigmoid(out1).squeeze(dim=1)
@@ -216,7 +218,7 @@ def train_segmentation(args,model, trainloader, optimizer, db_validation, valida
 
                 # Calculate cls_label_batch
                 cls_label_batch = (label_batch.sum(dim=(1,2)) > 0).float()
-                outputs, out0, out1, out2, cls_output = model(aug_image_batch)
+                outputs, out0, out1, out2, cls_output = student_model(aug_image_batch)
                 outputs = torch.sigmoid(outputs).squeeze(dim=1)
                 out0 = torch.sigmoid(out0).squeeze(dim=1)
                 out1 = torch.sigmoid(out1).squeeze(dim=1)
@@ -230,11 +232,63 @@ def train_segmentation(args,model, trainloader, optimizer, db_validation, valida
 
                 #AreaWeighted loss
                 loss4 = criterion(outputs, aug_label_batch)
-                #Standard
-                loss = loss0 + loss1 + loss2 + loss3 + loss4
+
+
+
+                if epoch_num < args.warmup_epochs:  # Typically 10-20
+
+                    #Standard
+                    loss = loss0 + loss1 + loss2 + loss3 + loss4
+                else:
+                    # Unsupervised learning block
+                    unlabelled_image_batch = unlabelled_image_batch.float()
+
+                    # MC Dropout predictions for student
+                    stu_pred, stu_uncert = mc_dropout_predict(student_model, unlabelled_image_batch, n_samples=4)
+
+                    # Teacher prediction (eval mode, no dropout)
+                    teacher_model.eval()
+                    with torch.no_grad():
+                        tea_logits, *_ = teacher_model(unlabelled_image_batch)
+                        tea_pred = torch.sigmoid(tea_logits)
+                    teacher_model.train()
+
+                    # Uncertainty mask
+                    initial_thresh = 0.2
+                    final_thresh = 0.05
+                    threshold = initial_thresh * (final_thresh/initial_thresh) ** (epoch_num/max_epoch)
+                    mask = get_uncertainty_mask(stu_uncert, threshold)
+
+                    # Mask sanity check
+                    mask_coverage = mask.sum() / mask.numel()
+                    if mask_coverage < 0.05 or mask_coverage > 0.95:
+                        loss_cons = 0.0
+                    else:
+                        loss_cons = ((stu_pred - tea_pred).pow(2) * mask).sum() / (mask.sum() + 1e-8)
+
+                    # Ramp-up lambda
+                    max_lambda = 0.1  # Critical adjustment
+                    rampup_length = 20
+                    lambda_cons = max_lambda * (1 - np.cos(np.pi * min(epoch_num/rampup_length, 1))) / 2
+
+                    # Total loss
+                    loss = loss0 + loss1 + loss2 + loss3 + loss4 + lambda_cons * loss_cons
+                # print(f"unsupervised loss: {loss_cons*lambda_cons}")
+                # print("stu_pred stats:", stu_pred.min().item(), stu_pred.max().item(), stu_pred.mean().item())
+                # print("tea_pred stats:", tea_pred.min().item(), tea_pred.max().item(), tea_pred.mean().item())
+                # print("mask sum:", mask.sum(), "mask shape:", mask.shape)
+                # print("loss_cons:", loss_cons)
+                # print("lambda_cons:", lambda_cons)
+                # print("lambda_cons * loss_cons:", (lambda_cons * loss_cons))
+
+
+
                 optimizer.zero_grad()
                 loss.backward()
+                torch.nn.utils.clip_grad_norm_(student_model.parameters(), max_norm=1.0)
+
                 optimizer.step()
+                update_ema(student_model=student_model, teacher_model=teacher_model)
                 
                 lr_ = base_lr * (1.0 - iter_num / max_iterations) ** 0.9
                 for param_group in optimizer.param_groups:
@@ -250,31 +304,31 @@ def train_segmentation(args,model, trainloader, optimizer, db_validation, valida
 
             iterator.close()
             save_mode_path = os.path.join(snapshot_path, 'seg_epoch'+ str(epoch_num) +'.pth')
-            torch.save(best_model.state_dict(), save_mode_path)
+            torch.save(best_student_model.state_dict(), save_mode_path)
 
-            max_dice, best_model =validation(args, model, db_validation, validationloader, max_dice,snapshot_path, best_model)
+            max_dice, best_student_model =validation(args, student_model, db_validation, validationloader, max_dice,snapshot_path, best_student_model)
 
             if epoch_num >= max_epoch - 1:
-                logging.info('Epoch %d : The best segmentation model saved as: best_seg.pth')
+                logging.info('Epoch %d : The best segmentation student_model saved as: best_seg.pth')
                 save_mode_path = os.path.join(snapshot_path, 'best_seg'+ '.pth')
-                torch.save(best_model.state_dict(), save_mode_path)
-                model=best_model
-                return best_model
+                torch.save(best_student_model.state_dict(), save_mode_path)
+                student_model=best_student_model
+                return best_student_model
             continue
 
-def train_classification(args, model, trainloader, optimizer,  db_validation, validationloader, iterator, base_lr ,criterion_cls, writer, max_epoch, max_iterations, snapshot_path, iter_num):
-    best_model=model
-    model.train()
-    for param in model.parameters():
+def train_classification(args, student_model, teacher_model, trainloader, optimizer,  db_validation, validationloader, iterator, base_lr ,criterion_cls, writer, max_epoch, max_iterations, snapshot_path, iter_num):
+    best_student_model=student_model
+    student_model.train()
+    for param in student_model.parameters():
          param.requires_grad= False
         
 
-    for param in model.classification_head.parameters():
+    for param in student_model.classification_head.parameters():
             param.requires_grad=True
-    for param in model.segmentation_head.parameters():
+    for param in student_model.segmentation_head.parameters():
         param.requires_grad = False
 
-    for module in model.modules():
+    for module in student_model.modules():
         if isinstance(module, nn.BatchNorm2d):
             module.eval()
 
@@ -287,7 +341,7 @@ def train_classification(args, model, trainloader, optimizer,  db_validation, va
                 image_batch, label_batch, label0_batch, label1_batch, label2_batch, preannotation_batch, preannotation0_batch, preannotation1_batch, preannotation2_batch = image_batch.cuda(), label_batch.cuda(), label0_batch.cuda(), label1_batch.cuda(), label2_batch.cuda(), preannotation_batch.cuda(), preannotation0_batch.cuda(), preannotation1_batch.cuda(), preannotation2_batch.cuda()
                 # Calculate cls_label_batch
                 cls_label_batch = (label_batch.sum(dim=(1,2)) > 0).float()
-                outputs, out0, out1, out2, cls_output = model(image_batch)
+                outputs, out0, out1, out2, cls_output = student_model(image_batch)
                                     
                 cls_output = cls_output.squeeze(-1)            
                 cls_loss = criterion_cls(cls_output, cls_label_batch.float())
@@ -316,9 +370,9 @@ def train_classification(args, model, trainloader, optimizer,  db_validation, va
             logging.info('Epoch %d : loss : %f' % (epoch_num, average_loss.item()))
 
             save_mode_path = os.path.join(snapshot_path, 'cls_epoch'+ str(epoch_num) +'.pth')
-            torch.save(best_model.state_dict(), save_mode_path)
+            torch.save(best_student_model.state_dict(), save_mode_path)
 
-            max_dice, best_model =validation(args, model, db_validation, validationloader, max_dice,snapshot_path, best_model, segmentation=False)
+            max_dice, best_student_model =validation(args, student_model, db_validation, validationloader, max_dice,snapshot_path, best_student_model, segmentation=False)
 
             iterator.close()
             continue
@@ -350,3 +404,67 @@ def augment(image, label, label0, label1, label2, preannotation, preannotation0,
         preannotation2 = TF.rotate(preannotation2.unsqueeze(0), angle).squeeze(0)
         
     return image, label, label0, label1, label2, preannotation, preannotation0, preannotation1, preannotation2
+
+def enable_dropout(student_model):
+    """Enable dropout layers during inference for MC Dropout."""
+    for m in student_model.modules():
+        if isinstance(m, nn.Dropout) or isinstance(m, nn.Dropout2d):
+            m.train()
+
+def update_ema(student_model, teacher_model, alpha=0.999):
+    with torch.no_grad():  # ✅ Essential for no grad flow
+        for s_param, t_param in zip(student_model.parameters(), 
+                                   teacher_model.parameters()):
+            t_param.data.mul_(alpha).add_(s_param.detach(), alpha=1-alpha)
+
+
+def mc_dropout_predict(model, x, n_samples=5):
+    # enable_dropout(model)
+    # preds = []
+    # with torch.no_grad():  # Critical for memory
+    #     for _ in range(n_samples):
+    #         logits, *_ = model(x)  # Segmentation logits [B,C,H,W]
+    #         preds.append(torch.sigmoid(logits).detach())  # ✅ Binary segmentation
+    # return torch.stack(preds).mean(0), torch.stack(preds).var(0)
+
+   
+    enable_dropout(model)
+    scale_preds = {
+        "logits": [],
+        "out0": [],
+        "out1": [],
+        "out2": []
+    }
+    
+    with torch.no_grad():
+        for _ in range(n_samples):
+            logits, out0, out1, out2, _ = model(x)
+            scale_preds["logits"].append(torch.sigmoid(logits))
+            scale_preds["out0"].append(torch.sigmoid(out0))
+            scale_preds["out1"].append(torch.sigmoid(out1))
+            scale_preds["out2"].append(torch.sigmoid(out2))
+    
+    # Process each scale separately
+    uncertainties = []
+    for scale_name, preds in scale_preds.items():
+        # Stack samples: [n_samples, B, C, H, W]
+        stacked = torch.stack(preds)
+        
+        # Calculate variance across samples
+        var = torch.var(stacked, dim=0).mean(dim=1, keepdim=True)  # [B, 1, H, W]
+        
+        # Upscale to original image size
+        var_upsampled = F.interpolate(var, size=x.shape[2:], mode='bilinear', align_corners=False)
+        uncertainties.append(var_upsampled)
+    
+    # Use only the highest resolution prediction (logits)
+    mean_pred = torch.stack(scale_preds["logits"]).mean(dim=0)
+    avg_uncertainty = torch.stack(uncertainties).mean(dim=0)
+    
+    return mean_pred, avg_uncertainty
+
+
+
+
+def get_uncertainty_mask(uncertainty, threshold=0.1):
+    return (uncertainty < threshold).float()

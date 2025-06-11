@@ -15,6 +15,7 @@ from sklearn.model_selection import train_test_split
 image_path='data/DICOM_dataset/micro_ultrasound_images/'
 mask_path='data/DICOM_dataset/micro_ultrasound_masks/'
 preannotation_path='data/DICOM_dataset/micro_ultrasound_preannotations/'
+unlabelled_images_path='data/DICOM_dataset/unlabelled_img/'
 
 #Lists of preprocessed images
 list_path='TransUNet/lists/'
@@ -22,17 +23,20 @@ list_path='TransUNet/lists/'
 out_image_path='data/train_png/'
 out_validation_image_path='data/validation_png/'
 out_test_image_path='data/test_png/'
+out_unlabelled_image_path='data/unlabelled_png/'
 
 #Create train, validation and test dataset
 os.makedirs(list_path, exist_ok=True)
 os.makedirs(out_image_path, exist_ok=True)
 os.makedirs(out_validation_image_path, exist_ok=True)
 os.makedirs(out_test_image_path, exist_ok=True)
+os.makedirs(out_unlabelled_image_path, exist_ok=True)
 
 #Store filenames into a list
 list_of_image=glob.glob(image_path + "*.dcm")
 list_of_mask=glob.glob(mask_path + "*.dcm")
 list_of_preannotation=glob.glob(preannotation_path + "*dcm")
+list_of_unlabelled=glob.glob(unlabelled_images_path + "*dcm")
 
 data = list(zip(natsorted(list_of_image), natsorted(list_of_mask), natsorted(list_of_preannotation)))
 
@@ -66,6 +70,7 @@ print('Preprocessing starts!')
 print('There are {} images, {} masks and {} non-expert annotations for training.'.format(len(list_of_image), len(list_of_mask), len(list_of_preannotation)))
 print('There are {} images, {} masks for validation.'.format(len(list_of_validation_image),len(list_of_validation_mask)))
 print('There are {} images, {} masks for testing.'.format(len(list_of_test_image), len(list_of_test_mask)))
+print('There are {} unlabelled images.'.format(len(list_of_unlabelled)))
 
 #Load DICOM images
 print('Storing train images.')
@@ -99,9 +104,9 @@ for i in tqdm(range(len(list_of_image))):
     output_mask_name = out_image_path + sub_name + "_train_mask_slice_" + idx + ".png"
     output_prean_name = out_image_path + sub_name + "_train_prean_slice_" + idx + ".png"
 
-    cv2.imwrite(output_image_name, img)
-    cv2.imwrite(output_mask_name, mask)
-    cv2.imwrite(output_prean_name, prean)
+    # cv2.imwrite(output_image_name, img)
+    # cv2.imwrite(output_mask_name, mask)
+    # cv2.imwrite(output_prean_name, prean)
 
 print('Storing validation images.')
 for i in tqdm(range(len(list_of_validation_image))):
@@ -123,8 +128,8 @@ for i in tqdm(range(len(list_of_validation_image))):
     output_val_image_name = out_validation_image_path + sub_name + "_val_img_slice_" + idx + ".png"
     output_val_mask_name = out_validation_image_path + sub_name  + "_val_mask_slice_" + idx + ".png"
 
-    cv2.imwrite(output_val_image_name, val_img)
-    cv2.imwrite(output_val_mask_name, val_mask)
+    # cv2.imwrite(output_val_image_name, val_img)
+    # cv2.imwrite(output_val_mask_name, val_mask)
 
 print('Storing test images.')
 for i in tqdm(range(len(list_of_test_image))):
@@ -146,8 +151,25 @@ for i in tqdm(range(len(list_of_test_image))):
     output_test_image_name = out_test_image_path + sub_name + "_test_img_slice_" + idx + ".png"
     output_test_mask_name = out_test_image_path + sub_name + "_test_mask_slice_" + idx + ".png"
 
-    cv2.imwrite(output_test_image_name, test_img)
-    cv2.imwrite(output_test_mask_name, test_mask)
+    # cv2.imwrite(output_test_image_name, test_img)
+    # cv2.imwrite(output_test_mask_name, test_mask)
+
+print('Storing unlabelled images')
+for i in tqdm(range(len(list_of_unlabelled))):  
+    unlabelled_img_name = list_of_unlabelled[i]
+
+    dicom_unlabelled_img_data=pydicom.dcmread(unlabelled_img_name)
+    unlabelled_img_data=dicom_unlabelled_img_data.pixel_array
+    unlabelled_img=cv2.normalize(unlabelled_img_data, None, 0, 255, cv2.NORM_MINMAX)
+    unlabelled_img=cv2.cvtColor(unlabelled_img, cv2.COLOR_BGR2RGB)
+
+    # img_resized=cv2.resize(img, (width, height))
+
+    sub_name = unlabelled_img_name.split("/")[-1].split("_")[0]
+    idx = unlabelled_img_name.split("/")[-1].split("_")[-1].split(".")[0]
+    output_unlabelled_image_name = out_unlabelled_image_path + sub_name + "_unlabelled_img_slice_" + idx + ".png"
+
+    #cv2.imwrite(output_unlabelled_image_name, unlabelled_img)
 
 # Generate CSV file for checking data.
 print('Start to generate csv file!')
@@ -164,8 +186,9 @@ validation_image_names = sorted(glob.glob(out_validation_image_path + "*val_img_
 validation_mask_names = sorted(glob.glob(out_validation_image_path + "*val_mask_slice*"), key=extract_numbers)
 test_image_names = sorted(glob.glob(out_test_image_path + "*test_img_slice*"),key=extract_numbers)
 test_mask_names = sorted(glob.glob(out_test_image_path + "*test_mask_slice*"),key=extract_numbers)
+unlabelled_image_names = sorted(glob.glob(out_unlabelled_image_path + "*_unlabelled_img_slice_*"),key=extract_numbers)
 
-array = np.empty((len(image_names) + 1,7), dtype='U60')
+array = np.empty((len(image_names) + 1,8), dtype='U80')
 array[0,0] = "image"
 array[0,1] = "mask"
 array[0,2] = "preannotation_mask"
@@ -173,6 +196,7 @@ array[0,3] = "validation_image"
 array[0,4] = "validation_mask"
 array[0,5] = "test_image"
 array[0,6] = "test_mask"
+array[0,7] = "unlabelled_image"
 
 for i in range(1,len(image_names)+1):
     array[i,0] = image_names[i-1].replace(out_image_path,"").split('.')[0]
@@ -186,6 +210,9 @@ for i in range(1, len(validation_image_names)+1):
 for i in range(1, len(test_image_names)+1):
     array[i,5] = test_image_names[i-1].split('/')[-1].split('.')[0]
     array[i,6] = test_mask_names[i-1].split('/')[-1].split('.')[0]
+
+for i in range(1, len(image_names)+1):
+    array[i,7] = unlabelled_image_names[i-1].split('/')[-1].split('.')[0]
 
 
     
@@ -205,6 +232,17 @@ for i in range(num):
     name.append(a)
 
 with open('TransUNet/lists/image.txt', 'w') as f:
+    for item in name:
+        f.write("%s\n" % item)
+
+key='unlabelled_image'
+num = data[key].values.size
+name = []
+for i in range(num):
+    a = data[key].values[i]
+    name.append(a)
+
+with open('TransUNet/lists/unlabelled_image.txt', 'w') as f:
     for item in name:
         f.write("%s\n" % item)
 

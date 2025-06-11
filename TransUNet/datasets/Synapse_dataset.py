@@ -11,10 +11,12 @@ class MultiscaleGenerator(object):
         self.output_size = output_size
 
     def __call__(self, sample):
-        image, label, preannotation = sample['image'], sample['label'], sample['preannotation']
+        image, label, preannotation, unlabelled_image = sample['image'], sample['label'], sample['preannotation'],sample['unlabelled_image']
 
         x, y = image.shape
         image = cv2.resize(image, self.output_size[3])
+
+        unlabelled_image = cv2.resize(unlabelled_image, self.output_size[3])
 
         label = cv2.resize(label, self.output_size[3])
         label0 = cv2.resize(label, self.output_size[0])
@@ -27,6 +29,7 @@ class MultiscaleGenerator(object):
         preannotation2 = cv2.resize(preannotation, self.output_size[2])
 
         image = torch.from_numpy(image.astype(np.float32)).unsqueeze(0)
+        unlabelled_image = torch.from_numpy(unlabelled_image.astype(np.float32)).unsqueeze(0)
 
         label = torch.from_numpy(label.astype(np.float32))
         label0 = torch.from_numpy(label0.astype(np.float32))
@@ -39,14 +42,15 @@ class MultiscaleGenerator(object):
         preannotation2 = torch.from_numpy(preannotation2.astype(np.float32))
 
         sample = {'image': image, 'label': label.long(), 'label0': label0.long(), 'label1': label1.long(), 'label2': label2.long(), 
-                  'preannotation': preannotation.long(), 'preannotation0': preannotation0.long(), 'preannotation1': preannotation1.long(), 'preannotation2': preannotation2.long()}
+                  'preannotation': preannotation.long(), 'preannotation0': preannotation0.long(), 'preannotation1': preannotation1.long(), 'preannotation2': preannotation2.long(), 'unlabelled_image' : unlabelled_image.long()}
         return sample
 
 class Synapse_dataset(Dataset):
-    def __init__(self, dataset_dir, list_dir, split, transform=None):
+    def __init__(self, dataset_dir, unlabelled_dir, list_dir, split, transform=None):
         self.transform = transform
         self.split = split
         self.data_dir = dataset_dir
+        self.unlabelled_data_dir = unlabelled_dir
         self.image_list = natsorted(open(os.path.join('TransUNet/'+list_dir, 'image'+'.txt')).readlines())
         self.label_list = natsorted(open(os.path.join('TransUNet/'+list_dir, 'mask'+'.txt')).readlines())
         self.preannotation_list = natsorted(open(os.path.join('TransUNet/'+list_dir, 'preannotation'+'.txt')).readlines())
@@ -54,6 +58,7 @@ class Synapse_dataset(Dataset):
         self.test_label_list = natsorted(open(os.path.join('TransUNet/'+list_dir, 'test'+'_mask'+'.txt')).readlines())
         self.validation_image_list = natsorted(open(os.path.join('TransUNet/'+list_dir, 'validation'+'_image'+'.txt')).readlines())
         self.validation_label_list = natsorted(open(os.path.join('TransUNet/'+list_dir, 'validation'+'_mask'+'.txt')).readlines())
+        self.unlabelled_image_list = natsorted(open(os.path.join('TransUNet/'+list_dir, 'unlabelled'+'_image'+'.txt')).readlines())
         
     def __len__(self):
         if self.split == 'train':
@@ -76,8 +81,12 @@ class Synapse_dataset(Dataset):
             image = cv2.imread(image_path)[:,:,0]/255.0
             label = cv2.imread(label_path)[:,:,0]/255.0
             preannotation = cv2.imread(preannotation_path)[:,:,0]/255.0
-                       
-            sample = {'image': image, 'label': label, 'preannotation': preannotation}
+
+            unlabelled_image_name = self.unlabelled_image_list[idx].strip('\n')
+            unlabelled_image_path = os.path.join(self.unlabelled_data_dir, unlabelled_image_name+'.png')
+            unlabelled_image = cv2.imread(unlabelled_image_path)[:,:,0]/255.0        
+
+            sample = {'image': image, 'label': label, 'preannotation': preannotation, 'unlabelled_image' : unlabelled_image}
             sample['case_name'] = self.image_list[idx].strip('\n')
 
         elif self.split == "validation":

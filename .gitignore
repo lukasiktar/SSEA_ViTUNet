@@ -4,8 +4,10 @@ data/test_png
 data/train_png
 data/unlabelled_img
 data/validation_png
+data/unlabelled_png
 model
 TransUNet/__pycache__
 TransUNet/lists
 TransUNet/networks/__pycache__
 TransUNet/datasets/__pycache__
+test_log

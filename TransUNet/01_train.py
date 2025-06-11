@@ -4,6 +4,7 @@ import numpy as np
 import argparse
 import torch
 import torch.backends.cudnn as cudnn
+import copy
 
 from networks.vit_seg_modeling import VisionTransformer as ViT_seg
 from networks.vit_seg_modeling import CONFIGS as CONFIGS_ViT_seg
@@ -13,6 +14,8 @@ torch.cuda.empty_cache()
 parser = argparse.ArgumentParser()
 parser.add_argument('--root_path', type=str,
                     default='./data/train_png', help='root dir for training data')
+parser.add_argument('--unlabelled_data_path', type=str,
+                    default='./data/unlabelled_png', help='root dir for training data')
 parser.add_argument('--validation_path', type=str,
                     default='./data/validation_png', help='root dir for validaiton data')
 parser.add_argument('--list_dir', type=str,
@@ -21,6 +24,8 @@ parser.add_argument('--num_classes', type=int,
                         default=1, help='output channel of network')
 parser.add_argument('--max_iterations', type=int,
                     default=30000, help='maximum iteration number to train')
+parser.add_argument('--warmup_epochs', type=int,
+                    default=6, help='number of supervised epochs')
 parser.add_argument('--max_epochs_seg', type=int,
                     default=30, help='maximum epoch number to train segmentation')
 parser.add_argument('--max_epochs_cls', type=int,
@@ -79,20 +84,24 @@ if __name__ == "__main__":
     
     #For full training
     config_vit.pretrained_path="./model/vit_checkpoint/imagenet21k/R50-ViT-B_16.npz"
-    # #load model
-    net = ViT_seg(config_vit, img_size=args.img_size, num_classes=config_vit.n_classes).cuda()
-    net.load_from(weights=np.load(config_vit.pretrained_path))
+    # #load model as student network
+    student_net = ViT_seg(config_vit, img_size=args.img_size, num_classes=config_vit.n_classes).cuda()
+    student_net.load_from(weights=np.load(config_vit.pretrained_path))
+
+    #Setup the teacher network
+    teacher_net = copy.deepcopy(student_net)
+    teacher_net.eval()  #Set the teacher model to eval beacause it is not trained directly
 
     #For classification
     # MODEL_PATH="model/CRTA_Segmentation_R50-ViT-B_16_img224_seg_epo30_cls_epo30_bs4/seg_epoch12.pth"
-    # net = ViT_seg(config_vit, img_size=args.img_size, num_classes=config_vit.n_classes).cuda()
-    # net.load_state_dict(torch.load(MODEL_PATH))
+    # student_net = ViT_seg(config_vit, img_size=args.img_size, num_classes=config_vit.n_classes).cuda()
+    # student_net.load_state_dict(torch.load(MODEL_PATH))
  
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    net = net.to(device)  # Move the model to the correct device
+    student_net = student_net.to(device)  # Move the model to the correct device
    
     dataset_name = "SSEA_ViTUnet"
 
     trainer_ = {'SSEA_ViTUnet': trainer}
-    trainer_[dataset_name](args, net, snapshot_path)
+    trainer_[dataset_name](args, student_net, teacher_net, snapshot_path)

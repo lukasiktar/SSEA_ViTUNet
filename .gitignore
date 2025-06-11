@@ -9,3 +9,4 @@ TransUNet/__pycache__
 TransUNet/lists
 TransUNet/networks/__pycache__
 TransUNet/datasets/__pycache__
+test_log

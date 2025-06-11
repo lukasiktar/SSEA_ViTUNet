@@ -292,8 +292,6 @@ def train_classification(args, model, trainloader, optimizer,  db_validation, va
                 cls_output = cls_output.squeeze(-1)            
                 cls_loss = criterion_cls(cls_output, cls_label_batch.float())
 
-                
-        
                 cls_output = cls_output.squeeze(-1)
                 
                 #For classification
@@ -303,7 +301,8 @@ def train_classification(args, model, trainloader, optimizer,  db_validation, va
                 loss.backward()
                 optimizer.step()
                 
-                lr_ = base_lr * (1.0 - iter_num / max_iterations) ** 0.9
+                
+                lr_ = base_lr * max(1.0 - iter_num / max_iterations) ** 0.9
                 for param_group in optimizer.param_groups:
                     param_group['lr'] = lr_
 

@@ -2,17 +2,21 @@ import os
 import sys
 import logging
 import random
-import torch
-import numpy as np
+
+from utils import attention_BCE_loss, AreaWeightedLoss, test_single_volume
+
 from tqdm import tqdm
+import numpy as np
+
+import torch
 import torch.nn as nn
 import torch.optim as optim
-from tensorboardX import SummaryWriter
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, DistributedSampler
+
 from torchvision import transforms
 import torchvision.transforms.functional as TF
 
-from utils import attention_BCE_loss, AreaWeightedLoss, test_single_volume
+from tensorboardX import SummaryWriter
 
 
 def trainer(args, model, snapshot_path):
@@ -36,9 +40,11 @@ def trainer(args, model, snapshot_path):
     def worker_init_fn(worker_id):
         random.seed(args.seed + worker_id)
 
-    trainloader = DataLoader(db_train, batch_size=batch_size, shuffle=True, num_workers=8, worker_init_fn=worker_init_fn)
-    if args.n_gpu > 1:
-        model = nn.DataParallel(model)
+    print(f'Using {args.n_gpu} GPU(s) for training.')
+    sampler = DistributedSampler(db_train)
+    trainloader = DataLoader(db_train, batch_size=batch_size, sampler=sampler, shuffle=False, num_workers=8, worker_init_fn=worker_init_fn)
+    # if args.n_gpu > 1:
+    #     model = nn.DataParallel(model)
     model.train()
 
     optimizer = optim.SGD(model.parameters(), lr=base_lr, momentum=0.9, weight_decay=0.0001)

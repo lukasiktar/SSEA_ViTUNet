@@ -117,7 +117,7 @@ if __name__ == "__main__":
         sampler=optuna.samplers.TPESampler(),
         pruner=optuna.pruners.MedianPruner()
     )
-    study.optimize(optuna_objective, n_trials=1)  # Run 50 trials
+    study.optimize(optuna_objective, n_trials=20)  # Run 50 trials
 
 
     # #For optuna

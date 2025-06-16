@@ -31,7 +31,9 @@ def objective(args,student_model, teacher_model, snapshot_path, trial):
     )
     
     # Run training
-    trainer(args, student_model, teacher_model, snapshot_path,trial)
+    max_dice = trainer(args, student_model, teacher_model, snapshot_path,trial)
+
+    return max_dice
     
 def trainer(args, student_model, teacher_model, snapshot_path,trial):
     from datasets.Synapse_dataset import MultiscaleGenerator, Synapse_dataset
@@ -96,14 +98,14 @@ def trainer(args, student_model, teacher_model, snapshot_path,trial):
     enable_dropout(student_model)
     iter_num=0
    
-    student_model=train_segmentation(args,student_model, teacher_model, trainloader, optimizer, db_validation, validationloader, seg_iterator, base_lr, hard_weight,writer,max_epochs_seg, max_iterations, snapshot_path, iter_num, criterion, trial)
+    max_dice, student_model=train_segmentation(args,student_model, teacher_model, trainloader, optimizer, db_validation, validationloader, seg_iterator, base_lr, hard_weight,writer,max_epochs_seg, max_iterations, snapshot_path, iter_num, criterion, trial)
 
-    train_classification(args, student_model, teacher_model, trainloader, optimizer, db_validation, validationloader, cls_iterator, base_lr ,criterion_cls, writer, max_epoch_cls, max_iterations, snapshot_path, iter_num)          
+    max_dice = train_classification(args, student_model, teacher_model, trainloader, optimizer, db_validation, validationloader, cls_iterator, base_lr ,criterion_cls, writer, max_epoch_cls, max_iterations, snapshot_path, iter_num)          
 
     writer.close()
     logging.shutdown()
 
-    return "Training Finished!"
+    return max_dice
 
 import optuna
 
@@ -348,8 +350,8 @@ def train_segmentation(args,student_model, teacher_model, trainloader, optimizer
                 save_mode_path = os.path.join(snapshot_path, 'best_seg'+ '.pth')
                 torch.save(best_student_model.state_dict(), save_mode_path)
                 student_model=best_student_model
-                return best_student_model
-            continue
+                return max_dice, best_student_model
+        return max_dice, best_student_model
 
 def train_classification(args, student_model, teacher_model, trainloader, optimizer,  db_validation, validationloader, iterator, base_lr ,criterion_cls, writer, max_epoch, max_iterations, snapshot_path, iter_num):
     best_student_model=student_model
@@ -410,7 +412,7 @@ def train_classification(args, student_model, teacher_model, trainloader, optimi
         max_dice, best_student_model =validation(args, student_model, db_validation, validationloader, max_dice,snapshot_path, best_student_model, segmentation=False)
 
         iterator.close()
-        continue
+        return max_dice
 
 def augment(image, label, label0, label1, label2, preannotation, preannotation0, preannotation1, preannotation2):
     # Random horizontal flip

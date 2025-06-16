@@ -159,7 +159,7 @@ if __name__ == "__main__":
     snapshot_path = snapshot_path + '_cls_epo' + str(args.max_epochs_cls) if args.max_epochs_cls != 15 else snapshot_path
 
     # batch size
-    snapshot_path = snapshot_path+'_bs'+str(args.batch_size)
+    snapshot_path = snapshot_path+'_bs'+str(args.batch_size)+"_v01_supervised"
     # base learning rate
     snapshot_path = snapshot_path + '_lr' + str(args.base_lr) if args.base_lr != 0.01 else snapshot_path
 
@@ -176,8 +176,8 @@ if __name__ == "__main__":
     net = ViT_seg(config_vit, img_size=args.img_size, num_classes=config_vit.n_classes).cuda()
    
     #snapshot = os.path.join(snapshot_path, 'cls_epoch_'+f"{i}"+'.pth')
-    snapshot = os.path.join(snapshot_path, 'best_seg.pth')
-    #snapshot = os.path.join(snapshot_path, 'best_cls.pth')
+    #snapshot = os.path.join(snapshot_path, 'best_seg.pth')
+    snapshot = os.path.join(snapshot_path, 'best_cls.pth')
     #snapshot = os.path.join(snapshot_path, 'epoch_'+str(args.max_epochs-1)+'.pth')
     print('The testing model is load from:', snapshot)
     net.load_state_dict(torch.load(snapshot, weights_only=True))

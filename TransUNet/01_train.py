@@ -8,14 +8,14 @@ import copy
 
 from networks.vit_seg_modeling import VisionTransformer as ViT_seg
 from networks.vit_seg_modeling import CONFIGS as CONFIGS_ViT_seg
-from trainer import trainer
+from trainer import trainer, objective
 torch.cuda.empty_cache()
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--root_path', type=str,
                     default='./data/train_png', help='root dir for training data')
 parser.add_argument('--unlabelled_data_path', type=str,
-                    default='./data/unlabelled_png', help='root dir for training data')
+                    default='./data/unlabelled_img', help='root dir for training data')
 parser.add_argument('--validation_path', type=str,
                     default='./data/validation_png', help='root dir for validaiton data')
 parser.add_argument('--list_dir', type=str,
@@ -27,9 +27,9 @@ parser.add_argument('--max_iterations', type=int,
 parser.add_argument('--warmup_epochs', type=int,
                     default=6, help='number of supervised epochs')
 parser.add_argument('--max_epochs_seg', type=int,
-                    default=30, help='maximum epoch number to train segmentation')
+                    default=2, help='maximum epoch number to train segmentation')
 parser.add_argument('--max_epochs_cls', type=int,
-                    default=30, help='maximum epoch number to train classification')
+                    default=2, help='maximum epoch number to train classification')
 parser.add_argument('--batch_size', type=int,
                     default=4, help='batch_size per gpu')
 parser.add_argument('--n_gpu', type=int, 
@@ -103,5 +103,25 @@ if __name__ == "__main__":
    
     dataset_name = "SSEA_ViTUnet"
 
-    trainer_ = {'SSEA_ViTUnet': trainer}
-    trainer_[dataset_name](args, student_net, teacher_net, snapshot_path)
+    # trainer_ = {'SSEA_ViTUnet': trainer}
+    # trainer_[dataset_name](args, student_net, teacher_net, snapshot_path)
+
+    import optuna
+
+    # Add this after model initialization
+    def optuna_objective(trial):
+        return objective(args, student_net, teacher_net, snapshot_path, trial)
+
+    study = optuna.create_study(
+        direction='maximize',
+        sampler=optuna.samplers.TPESampler(),
+        pruner=optuna.pruners.MedianPruner()
+    )
+    study.optimize(optuna_objective, n_trials=1)  # Run 50 trials
+
+
+    # #For optuna
+    # trainer_ = {'SSEA_ViTUnet': objective}
+    # trainer_[dataset_name](args, student_net, teacher_net, snapshot_path)
+
+    

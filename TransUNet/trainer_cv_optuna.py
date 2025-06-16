@@ -13,27 +13,15 @@ from torchvision import transforms
 import torchvision.transforms.functional as TF
 import torch.nn.functional as F
 from utils import attention_BCE_loss, AreaWeightedLoss, test_single_volume
+from utils import *
+from sklearn.model_selection import KFold
+from torch.utils.data import Subset
+import albumentations as A
+import optuna
+from networks.vit_seg_modeling import VisionTransformer as ViT_seg
+from networks.vit_seg_modeling import CONFIGS as CONFIGS_ViT_seg
 
-
-def objective(args,student_model, teacher_model, snapshot_path, trial):
-    # Hyperparameter suggestions
-    args.base_lr = trial.suggest_float('base_lr', 1e-3, 1e-1, log=True)
-    args.optimizer = trial.suggest_categorical('optimizer', ['SGD', 'Adam'])
-    #args.weight = trial.suggest_float('hard_weight', 0.1, 1.0)    
-    args.weight = trial.suggest_int('hard_weight', 1, 10)
-    args.warmup_epochs = trial.suggest_categorical('warmup_epochs', [4,6,8,10])
-    args.batch_size = trial.suggest_categorical('batch_size', [2,4])
-    
-    # Loss function parameters
-    criterion = AreaWeightedLoss(
-        area_threshold=trial.suggest_float('area_threshold', 0.2, 0.6),
-        high_weight=trial.suggest_float('high_weight', 0.05, 0.2)
-    )
-    
-    # Run training
-    trainer(args, student_model, teacher_model, snapshot_path,trial)
-    
-def trainer(args, student_model, teacher_model, snapshot_path,trial):
+def trainer(args, student_model,student_model_class, config_vit, teacher_model, snapshot_path):
     from datasets.Synapse_dataset import MultiscaleGenerator, Synapse_dataset
 
     logging.basicConfig(filename=snapshot_path + "/log.txt", level=logging.INFO,
@@ -54,24 +42,12 @@ def trainer(args, student_model, teacher_model, snapshot_path,trial):
     def worker_init_fn(worker_id):
         random.seed(args.seed + worker_id)
 
-
-    # Modified optimizer setup
-    if args.optimizer == 'SGD':
-        optimizer = optim.SGD(student_model.parameters(), lr=args.base_lr)
-    elif args.optimizer == 'Adam':
-        optimizer = optim.Adam(student_model.parameters(), lr=args.base_lr)
-    
-    # Dynamic batch size in DataLoader
-    trainloader = DataLoader(db_train, batch_size=args.batch_size, shuffle=True)
-
-
-
-    #trainloader = DataLoader(db_train, batch_size=batch_size, shuffle=True, num_workers=8, worker_init_fn=worker_init_fn)
+    trainloader = DataLoader(db_train, batch_size=batch_size, shuffle=True, num_workers=8, worker_init_fn=worker_init_fn)
     if args.n_gpu > 1:
         student_model = nn.DataParallel(student_model)
     student_model.train()
 
-    #optimizer = optim.SGD(student_model.parameters(), lr=base_lr, momentum=0.9, weight_decay=0.0001)
+    optimizer = optim.SGD(student_model.parameters(), lr=base_lr, momentum=0.9, weight_decay=0.0001)
 
     writer = SummaryWriter(snapshot_path + '/log')
 
@@ -95,21 +71,124 @@ def trainer(args, student_model, teacher_model, snapshot_path,trial):
 
     enable_dropout(student_model)
     iter_num=0
-   
-    student_model=train_segmentation(args,student_model, teacher_model, trainloader, optimizer, db_validation, validationloader, seg_iterator, base_lr, hard_weight,writer,max_epochs_seg, max_iterations, snapshot_path, iter_num, criterion, trial)
 
-    train_classification(args, student_model, teacher_model, trainloader, optimizer, db_validation, validationloader, cls_iterator, base_lr ,criterion_cls, writer, max_epoch_cls, max_iterations, snapshot_path, iter_num)          
+    nested_cv_with_optuna(args,student_model_class, config_vit, teacher_model, snapshot_path, db_train, hard_weight, max_epochs_seg,  db_validation, validationloader, max_iterations, criterion, n_trials=15, outer_folds=5, inner_folds=3)
+   
+    #student_model=train_segmentation(args,student_model, teacher_model, trainloader, optimizer, db_validation, validationloader, seg_iterator, base_lr, hard_weight,writer,max_epochs_seg, max_iterations, snapshot_path, iter_num, criterion)
+
+    #train_classification(args, student_model, teacher_model, trainloader, optimizer, db_validation, validationloader, cls_iterator, base_lr ,criterion_cls, writer, max_epoch_cls, max_iterations, snapshot_path, iter_num)          
 
     writer.close()
     logging.shutdown()
 
     return "Training Finished!"
 
-import optuna
+def nested_cv_with_optuna(args,student_model_class, config_vit, teacher_model, snapshot_path, dataset, hard_weight, max_epochs_seg,  db_validation, validationloader, max_iterations, criterion, n_trials=15, outer_folds=5, inner_folds=3):
+    logging.basicConfig(filename=snapshot_path + "/log.txt", level=logging.INFO,
+                        format='[%(asctime)s.%(msecs)03d] %(message)s', datefmt='%H:%M:%S')
+    logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
+    logging.info(str(args))
 
-   
+    outer_kf = KFold(n_splits=outer_folds, shuffle=False)
+    outer_scores = []
 
-    
+    for outer_fold, (train_val_idx, test_idx) in enumerate(outer_kf.split(dataset)):
+        logging.info(f"\n== Outer Fold {outer_fold+1}/{outer_folds} ==")
+
+        outer_train_val = Subset(dataset, train_val_idx)
+        outer_test = Subset(dataset, test_idx)
+        
+        def objective(trial):
+            #base_lr = trial.suggest_float("base_lr", 1e-4, 1e-2, log=True)
+            base_lr=0.01
+            #weight_decay = trial.suggest_float("weight_decay", 1e-5, 1e-2, log=True)
+            weight_decay=0.00001
+            batch_size = trial.suggest_categorical("batch_size", [2,4])
+            #pool_method = trial.suggest_categorical("pool_method", ["avgpool", "maxpool"])
+            weight = trial.suggest_int("weight", 2, 4)
+            
+
+            #args.base_lr = base_lr
+            #args.weight_decay = weight_decay
+            args.batch_size = batch_size
+            #args.pool_method = pool_method
+            args.weight = weight   
+
+            inner_kf = KFold(n_splits=inner_folds, shuffle=False)
+            inner_scores = []
+
+            for inner_train_idx, inner_val_idx in inner_kf.split(outer_train_val):
+                inner_train = Subset(outer_train_val, inner_train_idx)
+                inner_val = Subset(outer_train_val, inner_val_idx)
+
+                trainloader = DataLoader(inner_train, batch_size=batch_size, shuffle=False, num_workers=4, drop_last=True)
+                valloader = DataLoader(inner_val, batch_size=4, shuffle=False, num_workers=2)
+
+                model_instance = student_model_class(config_vit, img_size=args.img_size, num_classes=config_vit.n_classes).cuda()
+
+                print(f"Model: {model_instance}")
+
+                if args.n_gpu > 1:
+                    model_instance = nn.DataParallel(model_instance)
+
+                optimizer = optim.SGD(model_instance.parameters(), lr=base_lr, weight_decay=weight_decay)
+                scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max')
+                writer = SummaryWriter(snapshot_path + f'/log_trial_{trial.number}_fold_{outer_fold}')
+
+                iter_num = 0
+                seg_iterator = tqdm(range(args.max_epochs_seg), ncols=70)
+                cls_iterator = tqdm(range(args.max_epochs_cls), ncols=70)
+                criterion_cls = nn.BCEWithLogitsLoss()
+
+                dice_score, model_instance = train_segmentation(args, model_instance, teacher_model, trainloader, optimizer,  db_validation, validationloader, seg_iterator, base_lr, hard_weight,writer,max_epochs_seg, max_iterations, snapshot_path, iter_num, criterion)
+                inner_scores.append(dice_score)
+            return sum(inner_scores) / len(inner_scores)
+        # Run Optuna to get best hyperparameters on current outer fold
+        study = optuna.create_study(direction="maximize")
+        study.optimize(objective, n_trials=n_trials)
+        best_params = study.best_params
+        logging.info(f"Best inner params (Fold {outer_fold}): {best_params}")
+
+        # Train final model with best inner hyperparams on outer_train_val
+        args.base_lr = best_params["base_lr"]
+        args.weight_decay = best_params["weight_decay"]
+        args.batch_size = best_params["batch_size"]
+        args.pool_method = best_params["pool_method"]
+        args.weight = best_params["weight"]
+
+        trainloader = DataLoader(outer_train_val, batch_size=args.batch_size, shuffle=False, num_workers=4, drop_last=True)
+        testloader = DataLoader(outer_test, batch_size=4, shuffle=False, num_workers=2)
+
+        model_instance = student_model_class(config_vit, img_size=args.img_size, num_classes=config_vit.n_classes).cuda()
+
+        if args.n_gpu > 1:
+            model_instance = nn.DataParallel(model_instance)
+
+        optimizer = optim.SGD(model_instance.parameters(), lr=args.base_lr, weight_decay=args.weight_decay)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max')
+        writer = SummaryWriter(snapshot_path + f'/final_model_fold_{outer_fold}')
+        iter_num = 0
+        seg_iterator = tqdm(range(args.max_epochs_seg), ncols=70)
+        cls_iterator = tqdm(range(args.max_epochs_cls), ncols=70)
+        criterion_cls = nn.BCEWithLogitsLoss()
+
+        dice_score, model_instance= train_segmentation(args, model_instance, teacher_model, trainloader, optimizer,  db_validation, validationloader, seg_iterator, args.base_lr, hard_weight,writer,max_epochs_seg, max_iterations, snapshot_path, iter_num, criterion)
+
+        logging.info(f"Outer Fold {outer_fold+1} test score: {dice_score}")
+        outer_scores.append(dice_score)
+
+        with open("best_params.txt", "a") as f:
+            f.write(f"OUTER FOLD {outer_fold} best params: lr ({args.base_lr}), weight decay ({args.weight_decay}), batch size ({args.batch_size}), pool_method ({args.pool_method}), weight ({args.weight})\n")
+            f.write(f"Dice score: {dice_score}")
+
+    avg_score = sum(outer_scores) / len(outer_scores)
+    logging.info(f"\n=== Final Nested CV Score: {avg_score} ===")
+
+    return 'Training finished!'
+
+
+
+
 
 def validation(args, student_model, db_validation, validationloader, max_dice, snapshot_path, best_student_model, segmentation=True):
     student_model.eval()
@@ -173,7 +252,7 @@ def validation(args, student_model, db_validation, validationloader, max_dice, s
     best_student_model.train()
     return max_dice, best_student_model
 
-def train_segmentation(args,student_model, teacher_model, trainloader, optimizer, db_validation, validationloader,  iterator, base_lr, hard_weight,writer,max_epoch, max_iterations, snapshot_path, iter_num, criterion, trial=None):
+def train_segmentation(args,student_model, teacher_model, trainloader, optimizer, db_validation, validationloader,  iterator, base_lr, hard_weight,writer,max_epoch, max_iterations, snapshot_path, iter_num, criterion):
         #Freeze the classification head
         for param in student_model.classification_head.parameters():
             param.requires_grad=False
@@ -321,7 +400,7 @@ def train_segmentation(args,student_model, teacher_model, trainloader, optimizer
                 optimizer.step()
                 update_ema(student_model=student_model, teacher_model=teacher_model)
                 
-                lr_ = base_lr * (1.0 - iter_num / max_iterations) ** 0.9
+                lr_ = base_lr * max(0.0, 1.0 - iter_num / max_iterations) ** 0.9
                 for param_group in optimizer.param_groups:
                     param_group['lr'] = lr_
 
@@ -339,17 +418,14 @@ def train_segmentation(args,student_model, teacher_model, trainloader, optimizer
 
             max_dice, best_student_model =validation(args, student_model, db_validation, validationloader, max_dice,snapshot_path, best_student_model)
 
-            trial.report(max_dice, epoch_num)
-            if trial.should_prune():
-                raise optuna.TrialPruned()
-
-            if epoch_num >= max_epoch - 1:
-                logging.info('Epoch %d : The best segmentation student_model saved as: best_seg.pth')
-                save_mode_path = os.path.join(snapshot_path, 'best_seg'+ '.pth')
-                torch.save(best_student_model.state_dict(), save_mode_path)
-                student_model=best_student_model
-                return best_student_model
-            continue
+            # if epoch_num >= max_epoch - 1:
+            #     logging.info('Epoch %d : The best segmentation student_model saved as: best_seg.pth')
+            #     save_mode_path = os.path.join(snapshot_path, 'best_seg'+ '.pth')
+            #     torch.save(best_student_model.state_dict(), save_mode_path)
+            #     student_model=best_student_model
+            #     return best_student_model
+            # continue
+            return max_dice, best_student_model
 
 def train_classification(args, student_model, teacher_model, trainloader, optimizer,  db_validation, validationloader, iterator, base_lr ,criterion_cls, writer, max_epoch, max_iterations, snapshot_path, iter_num):
     best_student_model=student_model

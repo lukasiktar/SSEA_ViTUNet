@@ -150,21 +150,22 @@ def test_single_volume(image, label, net, classes, patch_size=[224, 224], test_s
             pred = cv2.resize(out, (y, x), interpolation = cv2.INTER_NEAREST)  
         else:
             pred = out
-        # if classification == True:
-        #     if torch.sigmoid(cls_output) < 0.9:
-        #         pred = np.zeros_like(image) 
+        if classification == True:
+            if torch.sigmoid(cls_output) < 0.9:
+                pred = np.zeros_like(image) 
+                print("Empty")
 
         a = 1.0*(pred>0.5)
         pred_uint8 = (a * 255).astype(np.uint8)
       
-        # slice = cv2.resize(slice, (y, x))
-        # label=label.astype(np.uint8)
-        # label_contours, hierarchy = cv2.findContours(label, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        # contours, hierarchy = cv2.findContours(pred_uint8, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        # orig_slice = cv2.drawContours(slice, contours, 0, (255,255,255), 4)
-        # orig_slice = cv2.drawContours(slice, label_contours, 0, (255,0,0), 4)
-        # cv2.imshow("pred",orig_slice)
-        # cv2.waitKey(10)
+        slice = cv2.resize(slice, (y, x))
+        label=label.astype(np.uint8)
+        label_contours, hierarchy = cv2.findContours(label, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        contours, hierarchy = cv2.findContours(pred_uint8, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        orig_slice = cv2.drawContours(slice, contours, 0, (255,255,255), 4)
+        orig_slice = cv2.drawContours(slice, label_contours, 0, (255,0,0), 4)
+        cv2.imshow("pred",orig_slice)
+        cv2.waitKey(10)
         prediction = a.astype(np.uint8)
         
     

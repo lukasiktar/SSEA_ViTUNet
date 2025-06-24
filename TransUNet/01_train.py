@@ -8,7 +8,9 @@ import copy
 
 from networks.vit_seg_modeling import VisionTransformer as ViT_seg
 from networks.vit_seg_modeling import CONFIGS as CONFIGS_ViT_seg
-from trainer import trainer, objective
+from trainer import trainer
+
+#from trainer_optuna import trainer, objective
 torch.cuda.empty_cache()
 
 parser = argparse.ArgumentParser()
@@ -37,19 +39,19 @@ parser.add_argument('--n_gpu', type=int,
 parser.add_argument('--deterministic', type=int,  
                     default=1, help='whether use deterministic training')
 parser.add_argument('--base_lr', type=float,  
-                    default=0.01, help='segmentation network learning rate at the start')
+                    default=0.04, help='segmentation network learning rate at the start')
 parser.add_argument('--img_size', type=int,
                     default=224, help='input image size of network input')
 parser.add_argument('--seed', type=int,
                     default=1234, help='random seed')
 parser.add_argument('--n_skip', type=int,
-                    default=3, help='using number of skip-connect, default is num')
+                    default=2, help='using number of skip-connect, default is num')
 parser.add_argument('--vit_name', type=str,
                     default='R50-ViT-B_16', help='select one vit model')
 parser.add_argument('--vit_patches_size', type=int,
                     default=16, help='vit_patches_size, default is 16')
 parser.add_argument('--weight', type=int,
-                    default=4, help='weight for hard regions, default is 4')                
+                    default=8, help='weight for hard regions, default is 4')                
 args = parser.parse_args()
 
 
@@ -108,20 +110,20 @@ if __name__ == "__main__":
 
     import optuna
 
-    # Add this after model initialization
-    def optuna_objective(trial):
-        return objective(args, student_net, teacher_net, snapshot_path, trial)
+    # # Add this after model initialization
+    # def optuna_objective(trial):
+    #     return objective(args, student_net, teacher_net, snapshot_path, trial)
 
-    study = optuna.create_study(
-        direction='maximize',
-        sampler=optuna.samplers.TPESampler(),
-        pruner=optuna.pruners.MedianPruner()
-    )
-    study.optimize(optuna_objective, n_trials=20)  # Run 50 trials
+    # study = optuna.create_study(
+    #     direction='maximize',
+    #     sampler=optuna.samplers.TPESampler(),
+    #     pruner=optuna.pruners.MedianPruner()
+    # )
+    # study.optimize(optuna_objective, n_trials=50)  # Run 50 trials
 
 
-    # #For optuna
-    # trainer_ = {'SSEA_ViTUnet': objective}
-    # trainer_[dataset_name](args, student_net, teacher_net, snapshot_path)
+    #For optuna
+    trainer_ = {'SSEA_ViTUnet': trainer}
+    trainer_[dataset_name](args, student_net, teacher_net, snapshot_path)
 
     

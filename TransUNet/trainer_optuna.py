@@ -15,7 +15,27 @@ import torch.nn.functional as F
 from utils import attention_BCE_loss, AreaWeightedLoss, test_single_volume
 
 
-def trainer(args, student_model, teacher_model, snapshot_path):
+def objective(args,student_model, teacher_model, snapshot_path, trial):
+    # Hyperparameter suggestions
+    args.base_lr = trial.suggest_float('base_lr', 1e-3, 1e-1, log=True)
+    args.optimizer = trial.suggest_categorical('optimizer', ['SGD', 'Adam'])
+    #args.weight = trial.suggest_float('hard_weight', 0.1, 1.0)    
+    args.weight = trial.suggest_int('hard_weight', 1, 10)
+    args.warmup_epochs = trial.suggest_categorical('warmup_epochs', [4,6,8,10])
+    args.batch_size = trial.suggest_categorical('batch_size', [2,4])
+    
+    # Loss function parameters
+    criterion = AreaWeightedLoss(
+        area_threshold=trial.suggest_float('area_threshold', 0.2, 0.6),
+        high_weight=trial.suggest_float('high_weight', 0.05, 0.2)
+    )
+    
+    # Run training
+    max_dice = trainer(args, student_model, teacher_model, snapshot_path,trial)
+
+    return max_dice
+    
+def trainer(args, student_model, teacher_model, snapshot_path,trial):
     from datasets.Synapse_dataset import MultiscaleGenerator, Synapse_dataset
 
     logging.basicConfig(filename=snapshot_path + "/log.txt", level=logging.INFO,
@@ -36,12 +56,24 @@ def trainer(args, student_model, teacher_model, snapshot_path):
     def worker_init_fn(worker_id):
         random.seed(args.seed + worker_id)
 
-    trainloader = DataLoader(db_train, batch_size=batch_size, shuffle=True, num_workers=8, worker_init_fn=worker_init_fn)
+
+    # Modified optimizer setup
+    if args.optimizer == 'SGD':
+        optimizer = optim.SGD(student_model.parameters(), lr=args.base_lr)
+    elif args.optimizer == 'Adam':
+        optimizer = optim.Adam(student_model.parameters(), lr=args.base_lr)
+    
+    # Dynamic batch size in DataLoader
+    trainloader = DataLoader(db_train, batch_size=args.batch_size, shuffle=True)
+
+
+
+    #trainloader = DataLoader(db_train, batch_size=batch_size, shuffle=True, num_workers=8, worker_init_fn=worker_init_fn)
     if args.n_gpu > 1:
         student_model = nn.DataParallel(student_model)
     student_model.train()
 
-    optimizer = optim.SGD(student_model.parameters(), lr=base_lr, momentum=0.9, weight_decay=0.0001)
+    #optimizer = optim.SGD(student_model.parameters(), lr=base_lr, momentum=0.9, weight_decay=0.0001)
 
     writer = SummaryWriter(snapshot_path + '/log')
 
@@ -64,15 +96,22 @@ def trainer(args, student_model, teacher_model, snapshot_path):
     validationloader=DataLoader(db_validation, batch_size=1, shuffle=False, num_workers=1)
 
     enable_dropout(student_model)
+    iter_num=0
    
-    student_model=train_segmentation(args,student_model, teacher_model, trainloader, optimizer, db_validation, validationloader, seg_iterator, base_lr, hard_weight,writer,max_epochs_seg, max_iterations, snapshot_path, iter_num, criterion)
+    max_dice, student_model=train_segmentation(args,student_model, teacher_model, trainloader, optimizer, db_validation, validationloader, seg_iterator, base_lr, hard_weight,writer,max_epochs_seg, max_iterations, snapshot_path, iter_num, criterion, trial)
 
-    train_classification(args, student_model, teacher_model, trainloader, optimizer, db_validation, validationloader, cls_iterator, base_lr ,criterion_cls, writer, max_epoch_cls, max_iterations, snapshot_path, iter_num)          
+    max_dice = train_classification(args, student_model, teacher_model, trainloader, optimizer, db_validation, validationloader, cls_iterator, base_lr ,criterion_cls, writer, max_epoch_cls, max_iterations, snapshot_path, iter_num)          
 
     writer.close()
     logging.shutdown()
 
-    return "Training Finished!"
+    return max_dice
+
+import optuna
+
+   
+
+    
 
 def validation(args, student_model, db_validation, validationloader, max_dice, snapshot_path, best_student_model, segmentation=True):
     student_model.eval()
@@ -136,7 +175,7 @@ def validation(args, student_model, db_validation, validationloader, max_dice, s
     best_student_model.train()
     return max_dice, best_student_model
 
-def train_segmentation(args,student_model, teacher_model, trainloader, optimizer, db_validation, validationloader,  iterator, base_lr, hard_weight,writer,max_epoch, max_iterations, snapshot_path, iter_num, criterion):
+def train_segmentation(args,student_model, teacher_model, trainloader, optimizer, db_validation, validationloader,  iterator, base_lr, hard_weight,writer,max_epoch, max_iterations, snapshot_path, iter_num, criterion, trial=None):
         #Freeze the classification head
         for param in student_model.classification_head.parameters():
             param.requires_grad=False
@@ -235,7 +274,7 @@ def train_segmentation(args,student_model, teacher_model, trainloader, optimizer
 
 
 
-                if epoch_num < args.warmup_epochs:  # Typically 10-20
+                if epoch_num < args.warmup_epochs:  
 
                     #Standard
                     loss = loss0 + loss1 + loss2 + loss3 + loss4
@@ -267,19 +306,13 @@ def train_segmentation(args,student_model, teacher_model, trainloader, optimizer
                         loss_cons = ((stu_pred - tea_pred).pow(2) * mask).sum() / (mask.sum() + 1e-8)
 
                     # Ramp-up lambda
-                    max_lambda = 0.1  # Critical adjustment
+                    max_lambda = 0.5  
                     rampup_length = 20
                     lambda_cons = max_lambda * (1 - np.cos(np.pi * min(epoch_num/rampup_length, 1))) / 2
 
                     # Total loss
                     loss = loss0 + loss1 + loss2 + loss3 + loss4 + lambda_cons * loss_cons
-                # print(f"unsupervised loss: {loss_cons*lambda_cons}")
-                # print("stu_pred stats:", stu_pred.min().item(), stu_pred.max().item(), stu_pred.mean().item())
-                # print("tea_pred stats:", tea_pred.min().item(), tea_pred.max().item(), tea_pred.mean().item())
-                # print("mask sum:", mask.sum(), "mask shape:", mask.shape)
-                # print("loss_cons:", loss_cons)
-                # print("lambda_cons:", lambda_cons)
-                # print("lambda_cons * loss_cons:", (lambda_cons * loss_cons))
+                
 
 
 
@@ -290,7 +323,7 @@ def train_segmentation(args,student_model, teacher_model, trainloader, optimizer
                 optimizer.step()
                 update_ema(student_model=student_model, teacher_model=teacher_model)
                 
-                lr_ = base_lr * max(0.0,1.0 - iter_num / max_iterations) ** 0.9
+                lr_ = base_lr * (1.0 - iter_num / max_iterations) ** 0.9
                 for param_group in optimizer.param_groups:
                     param_group['lr'] = lr_
 
@@ -308,13 +341,17 @@ def train_segmentation(args,student_model, teacher_model, trainloader, optimizer
 
             max_dice, best_student_model =validation(args, student_model, db_validation, validationloader, max_dice,snapshot_path, best_student_model)
 
+            trial.report(max_dice, epoch_num)
+            if trial.should_prune():
+                raise optuna.TrialPruned()
+
             if epoch_num >= max_epoch - 1:
                 logging.info('Epoch %d : The best segmentation student_model saved as: best_seg.pth')
                 save_mode_path = os.path.join(snapshot_path, 'best_seg'+ '.pth')
                 torch.save(best_student_model.state_dict(), save_mode_path)
                 student_model=best_student_model
-                return best_student_model
-            continue
+                return max_dice, best_student_model
+        return max_dice, best_student_model
 
 def train_classification(args, student_model, teacher_model, trainloader, optimizer,  db_validation, validationloader, iterator, base_lr ,criterion_cls, writer, max_epoch, max_iterations, snapshot_path, iter_num):
     best_student_model=student_model
@@ -332,50 +369,50 @@ def train_classification(args, student_model, teacher_model, trainloader, optimi
         if isinstance(module, nn.BatchNorm2d):
             module.eval()
 
-        max_dice=0.0
+    max_dice=0.0
 
-        for epoch_num in iterator:
-            epoch_loss = []
-            for i_batch, sampled_batch in enumerate(tqdm(trainloader)):
-                image_batch, label_batch, label0_batch, label1_batch, label2_batch, preannotation_batch, preannotation0_batch, preannotation1_batch, preannotation2_batch = sampled_batch['image'], sampled_batch['label'], sampled_batch['label0'], sampled_batch['label1'], sampled_batch['label2'], sampled_batch['preannotation'], sampled_batch['preannotation0'], sampled_batch['preannotation1'], sampled_batch['preannotation2']
-                image_batch, label_batch, label0_batch, label1_batch, label2_batch, preannotation_batch, preannotation0_batch, preannotation1_batch, preannotation2_batch = image_batch.cuda(), label_batch.cuda(), label0_batch.cuda(), label1_batch.cuda(), label2_batch.cuda(), preannotation_batch.cuda(), preannotation0_batch.cuda(), preannotation1_batch.cuda(), preannotation2_batch.cuda()
-                # Calculate cls_label_batch
-                cls_label_batch = (label_batch.sum(dim=(1,2)) > 0).float()
-                outputs, out0, out1, out2, cls_output = student_model(image_batch)
-                                    
-                cls_output = cls_output.squeeze(-1)            
-                cls_loss = criterion_cls(cls_output, cls_label_batch.float())
+    for epoch_num in iterator:
+        epoch_loss = []
+        for i_batch, sampled_batch in enumerate(tqdm(trainloader)):
+            image_batch, label_batch, label0_batch, label1_batch, label2_batch, preannotation_batch, preannotation0_batch, preannotation1_batch, preannotation2_batch = sampled_batch['image'], sampled_batch['label'], sampled_batch['label0'], sampled_batch['label1'], sampled_batch['label2'], sampled_batch['preannotation'], sampled_batch['preannotation0'], sampled_batch['preannotation1'], sampled_batch['preannotation2']
+            image_batch, label_batch, label0_batch, label1_batch, label2_batch, preannotation_batch, preannotation0_batch, preannotation1_batch, preannotation2_batch = image_batch.cuda(), label_batch.cuda(), label0_batch.cuda(), label1_batch.cuda(), label2_batch.cuda(), preannotation_batch.cuda(), preannotation0_batch.cuda(), preannotation1_batch.cuda(), preannotation2_batch.cuda()
+            # Calculate cls_label_batch
+            cls_label_batch = (label_batch.sum(dim=(1,2)) > 0).float()
+            outputs, out0, out1, out2, cls_output = student_model(image_batch)
+                                
+            cls_output = cls_output.squeeze(-1)            
+            cls_loss = criterion_cls(cls_output, cls_label_batch.float())
 
-                
-        
-                cls_output = cls_output.squeeze(-1)
-                
-                #For classification
-                loss =0.5*cls_loss
+            
+    
+            cls_output = cls_output.squeeze(-1)
+            
+            #For classification
+            loss =0.5*cls_loss
 
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-                
-                lr_ = base_lr * max(0.0,1.0 - iter_num / max_iterations) ** 0.9
-                for param_group in optimizer.param_groups:
-                    param_group['lr'] = lr_
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            
+            lr_ = base_lr * max(0, 1.0 - iter_num / max_iterations) ** 0.9
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = lr_
 
-                iter_num = iter_num + 1
-                epoch_loss.append(loss)
-                writer.add_scalar('info/lr', lr_, iter_num)
-                writer.add_scalar('info/total_loss', loss, iter_num)
+            iter_num = iter_num + 1
+            epoch_loss.append(loss)
+            writer.add_scalar('info/lr', lr_, iter_num)
+            writer.add_scalar('info/total_loss', loss, iter_num)
 
-            average_loss = sum(epoch_loss)/len(epoch_loss)
-            logging.info('Epoch %d : loss : %f' % (epoch_num, average_loss.item()))
+        average_loss = sum(epoch_loss)/len(epoch_loss)
+        logging.info('Epoch %d : loss : %f' % (epoch_num, average_loss.item()))
 
-            save_mode_path = os.path.join(snapshot_path, 'cls_epoch'+ str(epoch_num) +'.pth')
-            torch.save(best_student_model.state_dict(), save_mode_path)
+        save_mode_path = os.path.join(snapshot_path, 'cls_epoch'+ str(epoch_num) +'.pth')
+        torch.save(best_student_model.state_dict(), save_mode_path)
 
-            max_dice, best_student_model =validation(args, student_model, db_validation, validationloader, max_dice,snapshot_path, best_student_model, segmentation=False)
+        max_dice, best_student_model =validation(args, student_model, db_validation, validationloader, max_dice,snapshot_path, best_student_model, segmentation=False)
 
-            iterator.close()
-            continue
+        iterator.close()
+        return max_dice
 
 def augment(image, label, label0, label1, label2, preannotation, preannotation0, preannotation1, preannotation2):
     # Random horizontal flip
@@ -411,23 +448,14 @@ def enable_dropout(student_model):
         if isinstance(m, nn.Dropout) or isinstance(m, nn.Dropout2d):
             m.train()
 
-def update_ema(student_model, teacher_model, alpha=0.999):
-    with torch.no_grad():  # ✅ Essential for no grad flow
+def update_ema(student_model, teacher_model, alpha=0.899):
+    with torch.no_grad(): 
         for s_param, t_param in zip(student_model.parameters(), 
                                    teacher_model.parameters()):
             t_param.data.mul_(alpha).add_(s_param.detach(), alpha=1-alpha)
 
 
 def mc_dropout_predict(model, x, n_samples=5):
-    # enable_dropout(model)
-    # preds = []
-    # with torch.no_grad():  # Critical for memory
-    #     for _ in range(n_samples):
-    #         logits, *_ = model(x)  # Segmentation logits [B,C,H,W]
-    #         preds.append(torch.sigmoid(logits).detach())  # ✅ Binary segmentation
-    # return torch.stack(preds).mean(0), torch.stack(preds).var(0)
-
-   
     enable_dropout(model)
     scale_preds = {
         "logits": [],
@@ -444,7 +472,7 @@ def mc_dropout_predict(model, x, n_samples=5):
             scale_preds["out1"].append(torch.sigmoid(out1))
             scale_preds["out2"].append(torch.sigmoid(out2))
     
-    # Process each scale separately
+    
     uncertainties = []
     for scale_name, preds in scale_preds.items():
         # Stack samples: [n_samples, B, C, H, W]

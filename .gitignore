@@ -11,3 +11,4 @@ TransUNet/lists
 TransUNet/networks/__pycache__
 TransUNet/datasets/__pycache__
 test_log
+data/Micro_Ultrasound_Prostate_Segmentation_Dataset

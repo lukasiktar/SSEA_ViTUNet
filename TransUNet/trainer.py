@@ -274,54 +274,54 @@ def train_classification(args, model, trainloader, optimizer,  db_validation, va
     for param in model.segmentation_head.parameters():
         param.requires_grad = False
 
-    for module in model.modules():
-        if isinstance(module, nn.BatchNorm2d):
-            module.eval()
+    # for module in model.modules():
+    #     if isinstance(module, nn.BatchNorm2d):
+    #         module.eval()
 
-        max_dice=0.0
+    max_dice=0.0
 
-        for epoch_num in iterator:
-            epoch_loss = []
-            for i_batch, sampled_batch in enumerate(tqdm(trainloader)):
-                image_batch, label_batch, label0_batch, label1_batch, label2_batch, preannotation_batch, preannotation0_batch, preannotation1_batch, preannotation2_batch = sampled_batch['image'], sampled_batch['label'], sampled_batch['label0'], sampled_batch['label1'], sampled_batch['label2'], sampled_batch['preannotation'], sampled_batch['preannotation0'], sampled_batch['preannotation1'], sampled_batch['preannotation2']
-                image_batch, label_batch, label0_batch, label1_batch, label2_batch, preannotation_batch, preannotation0_batch, preannotation1_batch, preannotation2_batch = image_batch.cuda(), label_batch.cuda(), label0_batch.cuda(), label1_batch.cuda(), label2_batch.cuda(), preannotation_batch.cuda(), preannotation0_batch.cuda(), preannotation1_batch.cuda(), preannotation2_batch.cuda()
-                # Calculate cls_label_batch
-                cls_label_batch = (label_batch.sum(dim=(1,2)) > 0).float()
-                outputs, out0, out1, out2, cls_output = model(image_batch)
-                                    
-                cls_output = cls_output.squeeze(-1)            
-                cls_loss = criterion_cls(cls_output, cls_label_batch.float())
+    for epoch_num in iterator:
+        epoch_loss = []
+        for i_batch, sampled_batch in enumerate(tqdm(trainloader)):
+            image_batch, label_batch, label0_batch, label1_batch, label2_batch, preannotation_batch, preannotation0_batch, preannotation1_batch, preannotation2_batch = sampled_batch['image'], sampled_batch['label'], sampled_batch['label0'], sampled_batch['label1'], sampled_batch['label2'], sampled_batch['preannotation'], sampled_batch['preannotation0'], sampled_batch['preannotation1'], sampled_batch['preannotation2']
+            image_batch, label_batch, label0_batch, label1_batch, label2_batch, preannotation_batch, preannotation0_batch, preannotation1_batch, preannotation2_batch = image_batch.cuda(), label_batch.cuda(), label0_batch.cuda(), label1_batch.cuda(), label2_batch.cuda(), preannotation_batch.cuda(), preannotation0_batch.cuda(), preannotation1_batch.cuda(), preannotation2_batch.cuda()
+            # Calculate cls_label_batch
+            cls_label_batch = (label_batch.sum(dim=(1,2)) > 0).float()
+            outputs, out0, out1, out2, cls_output = model(image_batch)
+                                
+            cls_output = cls_output.squeeze(-1)            
+            cls_loss = criterion_cls(cls_output, cls_label_batch.float())
 
-                cls_output = cls_output.squeeze(-1)
-                
-                #For classification
-                loss =0.5*cls_loss
+            cls_output = cls_output.squeeze(-1)
+            
+            #For classification
+            loss =0.5*cls_loss
 
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-                
-                
-                lr_ = base_lr * max(0, 1.0 - iter_num / max_iterations) ** 0.9
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            
+            
+            lr_ = base_lr * max(0, 1.0 - iter_num / max_iterations) ** 0.9
 
-                for param_group in optimizer.param_groups:
-                    param_group['lr'] = lr_
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = lr_
 
-                iter_num = iter_num + 1
-                epoch_loss.append(loss)
-                writer.add_scalar('info/lr', lr_, iter_num)
-                writer.add_scalar('info/total_loss', loss, iter_num)
+            iter_num = iter_num + 1
+            epoch_loss.append(loss)
+            writer.add_scalar('info/lr', lr_, iter_num)
+            writer.add_scalar('info/total_loss', loss, iter_num)
 
-            average_loss = sum(epoch_loss)/len(epoch_loss)
-            logging.info('Epoch %d : loss : %f' % (epoch_num, average_loss.item()))
+        average_loss = sum(epoch_loss)/len(epoch_loss)
+        logging.info('Epoch %d : loss : %f' % (epoch_num, average_loss.item()))
 
-            save_mode_path = os.path.join(snapshot_path, 'cls_epoch'+ str(epoch_num) +'.pth')
-            torch.save(best_model.state_dict(), save_mode_path)
+        save_mode_path = os.path.join(snapshot_path, 'cls_epoch'+ str(epoch_num) +'.pth')
+        torch.save(best_model.state_dict(), save_mode_path)
 
-            max_dice, best_model =validation(args, model, db_validation, validationloader, max_dice,snapshot_path, best_model, segmentation=False)
+        max_dice, best_model =validation(args, model, db_validation, validationloader, max_dice,snapshot_path, best_model, segmentation=False)
 
-            iterator.close()
-            continue
+        iterator.close()
+        continue
 
 def augment(image, label, label0, label1, label2, preannotation, preannotation0, preannotation1, preannotation2):
     # Random horizontal flip

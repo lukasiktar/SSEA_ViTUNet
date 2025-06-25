@@ -13,17 +13,17 @@ from pydicom.dataset import FileDataset, FileMetaDataset
 from sklearn.model_selection import train_test_split
 
 #Data preprocessing and 2d images generation
-# image_path='data/DICOM_dataset/micro_ultrasound_images/'
-# mask_path='data/DICOM_dataset/micro_ultrasound_masks/'
-# preannotation_path='data/DICOM_dataset/micro_ultrasound_preannotations/'
+image_path='data/DICOM_dataset/micro_ultrasound_images/'
+mask_path='data/DICOM_dataset/micro_ultrasound_masks/'
+preannotation_path='data/DICOM_dataset/micro_ultrasound_preannotations/'
 
 #For MicroUS dataset
 # #Used datasets
-image_path = 'data/Micro_Ultrasound_Prostate_Segmentation_Dataset/train/micro_ultrasound_scans/'
-mask_path = 'data/Micro_Ultrasound_Prostate_Segmentation_Dataset/train/expert_annotations/'
-non_exp_path = 'data/Micro_Ultrasound_Prostate_Segmentation_Dataset/train/non_expert_annotations/'
-test_image_path = 'data/Micro_Ultrasound_Prostate_Segmentation_Dataset/test/micro_ultrasound_scans/'
-test_mask_path = 'data/Micro_Ultrasound_Prostate_Segmentation_Dataset/test/expert_annotations/'
+# image_path = 'data/Micro_Ultrasound_Prostate_Segmentation_Dataset/train/micro_ultrasound_scans/'
+# mask_path = 'data/Micro_Ultrasound_Prostate_Segmentation_Dataset/train/expert_annotations/'
+# non_exp_path = 'data/Micro_Ultrasound_Prostate_Segmentation_Dataset/train/non_expert_annotations/'
+# test_image_path = 'data/Micro_Ultrasound_Prostate_Segmentation_Dataset/test/micro_ultrasound_scans/'
+# test_mask_path = 'data/Micro_Ultrasound_Prostate_Segmentation_Dataset/test/expert_annotations/'
 
 #Lists of preprocessed images
 list_path='TransUNet/lists/'
@@ -231,9 +231,9 @@ else:
             output_seg_name = out_image_path + sub_name + '_' + idx + "_train_gt_slice_" + str(z) + ".png"
             output_student_seg_name = out_image_path + sub_name + '_' + idx + "_train_st_slice_" + str(z) + ".png"
             
-            # cv2.imwrite(output_image_name, image_2d_resized)
-            # cv2.imwrite(output_seg_name, seg_2d_resized)
-            # cv2.imwrite(output_student_seg_name, student_seg_2d_resized)
+            cv2.imwrite(output_image_name, image_2d_resized)
+            cv2.imwrite(output_seg_name, seg_2d_resized)
+            cv2.imwrite(output_student_seg_name, student_seg_2d_resized)
 
     #Extract validation images
     for i in tqdm(range(len(list_of_validation_image))):  
@@ -261,8 +261,8 @@ else:
             idx = validation_img_name.split("/")[-1].split("_")[-1].split(".")[0]
             output_validation_image_name = out_validation_image_path + sub_name + '_' + idx + "_val_img_slice_" + str(z) + ".png"
             output_validation_seg_name = out_validation_image_path + sub_name + '_' + idx + "_val_gt_slice_" + str(z) + ".png"
-            # cv2.imwrite(output_validation_image_name, image_2d_resized)
-            # cv2.imwrite(output_validation_seg_name, seg_2d_resized)
+            cv2.imwrite(output_validation_image_name, image_2d_resized)
+            cv2.imwrite(output_validation_seg_name, seg_2d_resized)
 
     #Extract test images
     for i in tqdm(range(len(list_of_test_image))):  
@@ -293,8 +293,8 @@ else:
             idx = test_img_name.split("/")[-1].split("_")[-1].split(".")[0]
             output_test_image_name = out_test_image_path + sub_name + '_' + idx + "_test_img_slice_" + str(z) + ".png"
             output_test_seg_name = out_test_image_path + sub_name + '_' + idx + "_test_gt_slice_" + str(z) + ".png"
-            # cv2.imwrite(output_test_image_name, image_2d_resized)
-            # cv2.imwrite(output_test_seg_name, seg_2d_resized)
+            cv2.imwrite(output_test_image_name, image_2d_resized)
+            cv2.imwrite(output_test_seg_name, seg_2d_resized)
 
 
 
@@ -324,7 +324,7 @@ if image_path.split("/")[1]=="DICOM_dataset":
     test_image_names = sorted(glob.glob(out_test_image_path + "*test_img_slice*"),key=extract_numbers_dicom)
     test_mask_names = sorted(glob.glob(out_test_image_path + "*test_mask_slice*"),key=extract_numbers_dicom)
 
-    array = np.empty((len(image_names) + 1,7), dtype='U60')
+    array = np.empty((len(image_names) + 1,7), dtype='U80')
     array[0,0] = "image"
     array[0,1] = "mask"
     array[0,2] = "preannotation_mask"

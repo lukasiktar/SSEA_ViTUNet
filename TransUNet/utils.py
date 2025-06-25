@@ -118,7 +118,7 @@ def calculate_metric_percase(pred, gt, spacing):
             hd95 = float(0.0)
         else:
             hd95 = metric.binary.hd95(pred, gt)
-
+    
     dice = metric.binary.dc(pred, gt) if np.sum(gt) > 0 else 0  
     jc = metric.binary.jc(pred, gt) if np.sum(gt) > 0 else 0
     sp = metric.binary.specificity(pred, gt) if np.sum(gt) > 0 else 0
